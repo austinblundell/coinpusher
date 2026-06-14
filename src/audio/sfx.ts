@@ -1,13 +1,34 @@
-// All sound is synthesized with the Web Audio API — no asset files. Coin clinks
-// are bandpassed metallic pings; payouts are bright bell tones; the jackpot is a
-// quick ascending arpeggio. AudioContext is created lazily on first user gesture
-// so browsers don't block it.
+// All sound is synthesized with the Web Audio API — no asset files. Payouts are
+// bright bell tones; the jackpot is a quick ascending arpeggio; a looping chiptune
+// plays bouncy arcade music underneath it all. AudioContext is created lazily on
+// first user gesture so browsers don't block it.
+
+// Equal-tempered note frequencies (Hz) used by the music sequencer.
+const NOTE: Record<string, number> = {
+  F2: 87.31, G2: 98.0, A2: 110.0, C3: 130.81, D3: 146.83, E3: 164.81,
+  F4: 349.23, G4: 392.0, A4: 440.0, B4: 493.88,
+  C5: 523.25, D5: 587.33, E5: 659.25, F5: 698.46, G5: 783.99, A5: 880.0,
+};
+
+// A cheerful 4-bar loop (C – G – Am – F), eighth-note grid. "-" is a rest.
+const LEAD = [
+  "G4", "C5", "E5", "G5", "E5", "C5", "E5", "G5", // C
+  "G4", "B4", "D5", "G5", "D5", "B4", "D5", "G5", // G
+  "A4", "C5", "E5", "A5", "E5", "C5", "E5", "A5", // Am
+  "F4", "A4", "C5", "F5", "C5", "A4", "C5", "F5", // F
+];
+const BASS = [
+  "C3", "-", "C3", "-", "G2", "-", "C3", "-",
+  "G2", "-", "G2", "-", "D3", "-", "G2", "-",
+  "A2", "-", "A2", "-", "E3", "-", "A2", "-",
+  "F2", "-", "F2", "-", "C3", "-", "F2", "-",
+];
+const MUSIC_BPM = 130;
 
 export class Sfx {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
-  private lastClink = 0;
-  private clinkBudget = 0;
+  private music: { bus: GainNode; timer: number; nextTime: number; step: number } | null = null;
   enabled = true;
 
   private ensure(): AudioContext | null {
@@ -29,33 +50,61 @@ export class Sfx {
     this.ensure();
   }
 
-  // Metallic coin contact. Throttled and budgeted so a cascade doesn't machine-gun.
-  clink(intensity = 1) {
+  // ---- Looping arcade music --------------------------------------------------
+  // Starts a self-scheduling chiptune. Idempotent: safe to call on every gesture.
+  startMusic() {
     const ctx = this.ensure();
-    if (!ctx || !this.master) return;
-    const now = ctx.currentTime;
-    // Refill a small budget over time; cap simultaneous clinks.
-    this.clinkBudget = Math.min(6, this.clinkBudget + (now - this.lastClink) * 14);
-    this.lastClink = now;
-    if (this.clinkBudget < 1) return;
-    this.clinkBudget -= 1;
+    if (!ctx || !this.master || this.music) return;
+    const bus = ctx.createGain();
+    bus.gain.setValueAtTime(0.0001, ctx.currentTime);
+    bus.gain.exponentialRampToValueAtTime(0.9, ctx.currentTime + 1.2); // gentle fade-in
+    bus.connect(this.master);
+    this.music = { bus, timer: 0, nextTime: ctx.currentTime + 0.08, step: 0 };
+    this.scheduleMusic();
+  }
 
+  stopMusic() {
+    if (!this.music) return;
+    window.clearTimeout(this.music.timer);
+    if (this.ctx) {
+      const now = this.ctx.currentTime;
+      this.music.bus.gain.cancelScheduledValues(now);
+      this.music.bus.gain.setValueAtTime(this.music.bus.gain.value, now);
+      this.music.bus.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
+    }
+    this.music = null;
+  }
+
+  // Look-ahead scheduler: queue any notes due in the next 200ms, then re-arm.
+  private scheduleMusic = () => {
+    const ctx = this.ctx;
+    const m = this.music;
+    if (!ctx || !m) return;
+    const stepDur = 60 / MUSIC_BPM / 2; // eighth-note grid
+    while (m.nextTime < ctx.currentTime + 0.2) {
+      const lead = LEAD[m.step % LEAD.length];
+      const bass = BASS[m.step % BASS.length];
+      if (lead !== "-") this.voice(NOTE[lead], m.nextTime, "square", stepDur * 0.9, 0.18, m.bus);
+      if (bass !== "-") this.voice(NOTE[bass], m.nextTime, "triangle", stepDur * 1.8, 0.3, m.bus);
+      m.nextTime += stepDur;
+      m.step++;
+    }
+    m.timer = window.setTimeout(this.scheduleMusic, 25);
+  };
+
+  // One percussive synth note with a quick attack and exponential decay.
+  private voice(freq: number, t: number, type: OscillatorType, dur: number, peak: number, dest: GainNode) {
+    const ctx = this.ctx!;
     const osc = ctx.createOscillator();
-    const bp = ctx.createBiquadFilter();
     const g = ctx.createGain();
-    osc.type = "triangle";
-    const base = 1700 + Math.random() * 1400;
-    osc.frequency.value = base;
-    bp.type = "bandpass";
-    bp.frequency.value = base;
-    bp.Q.value = 6;
-    const vol = Math.min(0.22, 0.06 + intensity * 0.12);
-    g.gain.setValueAtTime(0.0001, now);
-    g.gain.exponentialRampToValueAtTime(vol, now + 0.004);
-    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.13);
-    osc.connect(bp).connect(g).connect(this.master);
-    osc.start(now);
-    osc.stop(now + 0.15);
+    osc.type = type;
+    osc.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(peak, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(g).connect(dest);
+    osc.start(t);
+    osc.stop(t + dur + 0.02);
   }
 
   // Bright two-note "cha-ching" when a coin banks.

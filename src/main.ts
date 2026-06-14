@@ -105,27 +105,56 @@ async function main() {
   };
 
   const drop = () => coins.drop(PLAYER_DENOM, dropX);
+  const unlockAudio = () => { sfx.resume(); sfx.startMusic(); };
 
-  let downX = 0, downY = 0, downT = 0, dragged = false;
+  // Tap (or click) drops one coin; press-and-hold streams coins — the touch
+  // equivalent of holding Space. Dragging orbits the camera (OrbitControls) and
+  // drops nothing.
+  const HOLD_DELAY = 200;   // ms a press must be held before it starts streaming
+  const STREAM_EVERY = 110; // ms between streamed coins while held
+  let downX = 0, downY = 0, downT = 0, dragged = false, streaming = false;
+  let holdTimer = 0, streamTimer = 0;
+
+  const stopHold = () => {
+    clearTimeout(holdTimer);
+    clearInterval(streamTimer);
+    holdTimer = 0; streamTimer = 0;
+  };
+
   canvas.addEventListener("pointerdown", (e) => {
-    sfx.resume();
-    downX = e.clientX; downY = e.clientY; downT = performance.now(); dragged = false;
+    unlockAudio();
+    downX = e.clientX; downY = e.clientY; downT = performance.now();
+    dragged = false; streaming = false;
+    const x = pointerToDeckX(e.clientX, e.clientY);
+    if (x !== null) { dropX = x; aim.position.x = x; }
+    stopHold();
+    holdTimer = window.setTimeout(() => {
+      if (dragged) return; // became an orbit drag before the hold elapsed
+      streaming = true;
+      drop(); // first coin of the stream
+      streamTimer = window.setInterval(drop, STREAM_EVERY);
+    }, HOLD_DELAY);
   });
   canvas.addEventListener("pointermove", (e) => {
-    if (e.buttons && (Math.abs(e.clientX - downX) > 5 || Math.abs(e.clientY - downY) > 5)) dragged = true;
+    if (e.buttons && (Math.abs(e.clientX - downX) > 5 || Math.abs(e.clientY - downY) > 5)) {
+      if (!streaming) dragged = true; // moving before the stream starts = orbit
+    }
+    if (dragged) stopHold();
     const x = pointerToDeckX(e.clientX, e.clientY);
     if (x !== null) { dropX = x; aim.position.x = x; }
   });
-  canvas.addEventListener("pointerup", (e) => {
-    if (dragged || performance.now() - downT > 400) return; // it was an orbit drag
-    const x = pointerToDeckX(e.clientX, e.clientY);
-    if (x !== null) dropX = x;
-    drop();
-  });
+  const endPress = () => {
+    stopHold();
+    // A quick tap that never turned into a drag or a stream drops a single coin.
+    if (!dragged && !streaming && performance.now() - downT <= 400) drop();
+    streaming = false;
+  };
+  canvas.addEventListener("pointerup", endPress);
+  canvas.addEventListener("pointercancel", () => { stopHold(); streaming = false; });
 
-  // Spacebar also drops a quarter at the current aim.
+  // Spacebar also drops a quarter at the current aim (hold to repeat via key-repeat).
   window.addEventListener("keydown", (e) => {
-    if (e.code === "Space") { e.preventDefault(); drop(); }
+    if (e.code === "Space") { e.preventDefault(); unlockAudio(); drop(); }
   });
 
   // ---- Reveal once everything is ready ----
@@ -140,7 +169,6 @@ async function main() {
 
     machine.update(t);
     physics.step(dt);
-    coins.handleCollisions();
     coins.update();
     prizes.update();
 

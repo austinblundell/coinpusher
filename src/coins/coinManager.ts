@@ -24,7 +24,6 @@ export class CoinManager {
   renderers: CoinRenderer[];
   group = new THREE.Group();
   private coins: Coin[] = [];
-  private coinColliders = new Set<number>();
 
   constructor(
     private physics: Physics,
@@ -107,29 +106,17 @@ export class CoinManager {
     }
     body.setRotation({ x: rq.x, y: rq.y, z: rq.z, w: rq.w }, true);
 
-    const collider = world.createCollider(
+    world.createCollider(
       RAPIER.ColliderDesc.cylinder(denom.thickness / 2, denom.radius)
         .setDensity(8.0)
         .setFriction(0.42)
-        .setRestitution(0.04)
-        .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
+        .setRestitution(0.04),
       body,
     );
 
-    this.coinColliders.add(collider.handle);
     this.coins.push({ body, denomIndex });
     if (channel) this.sfx.drop();
     return true;
-  }
-
-  // Play throttled metallic clinks for coin contacts this step.
-  handleCollisions() {
-    this.physics.eventQueue.drainCollisionEvents((h1, h2, started) => {
-      if (!started) return;
-      if (this.coinColliders.has(h1) || this.coinColliders.has(h2)) {
-        this.sfx.clink(0.5 + Math.random() * 0.5);
-      }
-    });
   }
 
   // Sync instanced meshes from physics + detect coins that left the deck.
@@ -186,9 +173,6 @@ export class CoinManager {
     const i = this.coins.indexOf(coin);
     if (i === -1) return;
     this.coins.splice(i, 1);
-    // Remove its collider handle from the coin set.
-    const c = coin.body.collider(0);
-    if (c) this.coinColliders.delete(c.handle);
     this.physics.world.removeRigidBody(coin.body);
   }
 }
