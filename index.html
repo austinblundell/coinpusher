@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Coin Pusher Deluxe</title>
+    <link rel="stylesheet" href="/src/ui/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="scene"></canvas>
+
+      <!-- Loading overlay -->
+      <div id="loader">
+        <div class="loader-coin"></div>
+        <div class="loader-text">Minting coins&hellip;</div>
+      </div>
+
+      <!-- HUD -->
+      <div id="hud" class="hidden">
+        <div class="hud-top">
+          <div class="panel winnings">
+            <span class="label">CASH WON</span>
+            <span class="value" id="winnings">$0.00</span>
+          </div>
+        </div>
+
+        <div id="jackpot" class="jackpot hidden">JACKPOT!</div>
+
+        <div class="hud-bottom">
+          <div class="hint">Click the table to drop a quarter &middot; drag to look around</div>
+        </div>
+      </div>
+
+      <div id="floaters"></div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
